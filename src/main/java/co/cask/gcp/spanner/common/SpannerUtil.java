@@ -26,7 +26,7 @@ import java.io.IOException;
 import java.util.Set;
 
 /**
- * Spanner utility classs to get spanner service
+ * Spanner utility class to get spanner service
  */
 public class SpannerUtil {
   // todo CDAP-14233 - add support for array
@@ -70,5 +70,76 @@ public class SpannerUtil {
         }
       }
     }
+  }
+
+  public static String convertSchemaToCreateStatement(String tableName, Schema schema) {
+    StringBuilder createStmt = new StringBuilder();
+    createStmt.append("CREATE TABLE ").append(tableName).append(" (");
+
+    for (Schema.Field field : schema.getFields()) {
+      String name = field.getName();
+      Schema fieldSchema = field.getSchema();
+      fieldSchema = fieldSchema.isNullable() ? fieldSchema.getNonNullable() : fieldSchema;
+      Schema.LogicalType logicalType = fieldSchema.getLogicalType();
+      String spannerType;
+
+      if (logicalType != null) {
+        switch (logicalType) {
+          case DATE:
+            spannerType = "DATE";
+            break;
+          case TIMESTAMP_MILLIS:
+          case TIMESTAMP_MICROS:
+            spannerType = "TIMESTAMP";
+            break;
+          default:
+            // this should not happen
+            throw new IllegalStateException("Logical type" + logicalType + " is not supported.");
+        }
+        addColumn(createStmt, name, fieldSchema.isNullable(), spannerType);
+        continue;
+      }
+
+      Schema.Type type = fieldSchema.getType();
+      switch (type) {
+        case BOOLEAN:
+          spannerType = "BOOLEAN";
+          break;
+        case STRING:
+          spannerType = "STRING(MAX)";
+          break;
+        case LONG:
+          spannerType = "INT64";
+          break;
+        case DOUBLE:
+          spannerType = "FLOAT64";
+          break;
+        case BYTES:
+          spannerType = "BYTES(MAX)";
+          break;
+        default:
+          throw new IllegalStateException(type.name() + " : Type currently not supported.");
+      }
+      addColumn(createStmt, name, fieldSchema.isNullable(), spannerType);
+    }
+
+    // remove trailing ", "
+    createStmt.deleteCharAt(createStmt.length() - 1)
+      .deleteCharAt(createStmt.length() - 1)
+      .append(")");
+
+    // If table does not exist, by default first column becomes primary key
+    createStmt.append(" PRIMARY KEY (").append(schema.getFields().get(0).getName()).append(")");
+
+
+    return createStmt.toString();
+  }
+
+  private static void addColumn(StringBuilder createStmt, String name, boolean isNullable, String spannerType) {
+    createStmt.append(name).append(" ").append(spannerType);
+    if (!isNullable) {
+      createStmt.append(" NOT NULL");
+    }
+    createStmt.append(", ");
   }
 }
